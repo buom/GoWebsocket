@@ -92,6 +92,16 @@ Create instance of `Websocket` by passing url of websocket-server end-point
 
         socket.Connect()
 
+        // re-connect
+        go func() {
+            ticker := time.NewTicker(2 * time.Second)
+            for range ticker.C {
+                if !socket.IsConnected {
+                    socket.Connect()
+                }
+            }
+        }()
+
         for {
             select {
             case <-interrupt:
