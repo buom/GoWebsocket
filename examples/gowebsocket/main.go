@@ -2,7 +2,7 @@ package main
 
 import (
 	"log"
-	"github.com/sacOO7/gowebsocket"
+	"github.com/buom/gowebsocket"
 	"os"
 	"os/signal"
 )
