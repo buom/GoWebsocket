@@ -1,14 +1,15 @@
 package gowebsocket
 
 import (
-	"github.com/gorilla/websocket"
-	"net/http"
-	"errors"
 	"crypto/tls"
+	"errors"
+	"net/http"
 	"net/url"
-	"sync"
-	"github.com/sacOO7/go-logger"
 	"reflect"
+	"sync"
+
+	"github.com/gorilla/websocket"
+	logging "github.com/sacOO7/go-logger"
 )
 
 type Empty struct {
@@ -21,32 +22,33 @@ func (socket Socket) EnableLogging() {
 }
 
 func (socket Socket) GetLogger() logging.Logger {
-	return logger;
+	return logger
 }
 
 type Socket struct {
-	Conn              *websocket.Conn
-	WebsocketDialer   *websocket.Dialer
-	Url               string
-	ConnectionOptions ConnectionOptions
-	RequestHeader     http.Header
-	OnConnected       func(socket Socket)
-	OnTextMessage     func(message string, socket Socket)
-	OnBinaryMessage   func(data [] byte, socket Socket)
-	OnConnectError    func(err error, socket Socket)
-	OnDisconnected    func(err error, socket Socket)
-	OnPingReceived    func(data string, socket Socket)
-	OnPongReceived    func(data string, socket Socket)
-	IsConnected       bool
-	sendMu            *sync.Mutex // Prevent "concurrent write to websocket connection"
-	receiveMu         *sync.Mutex
+	Conn                *websocket.Conn
+	WebsocketDialer     *websocket.Dialer
+	Url                 string
+	ConnectionOptions   ConnectionOptions
+	RequestHeader       http.Header
+	OnConnected         func(socket Socket)
+	OnTextMessage       func(message string, socket Socket)
+	OnBinaryMessage     func(data []byte, socket Socket)
+	OnConnectError      func(err error, socket Socket)
+	OnCloseError        func(err error, socket Socket)
+	OnDisconnected      func(err error, socket Socket)
+	OnPingReceived      func(data string, socket Socket)
+	OnPongReceived      func(data string, socket Socket)
+	IsConnected         bool
+	sendMu              *sync.Mutex // Prevent "concurrent write to websocket connection"
+	receiveMu           *sync.Mutex
 }
 
 type ConnectionOptions struct {
 	UseCompression bool
 	UseSSL         bool
 	Proxy          func(*http.Request) (*url.URL, error)
-	Subprotocols   [] string
+	Subprotocols   []string
 }
 
 // todo Yet to be done
@@ -55,7 +57,7 @@ type ReconnectionOptions struct {
 
 func New(url string) Socket {
 	return Socket{
-		Url: url,
+		Url:           url,
 		RequestHeader: http.Header{},
 		ConnectionOptions: ConnectionOptions{
 			UseCompression: false,
@@ -75,7 +77,7 @@ func (socket *Socket) setConnectionOptions() {
 }
 
 func (socket *Socket) Connect() {
-	var err error;
+	var err error
 	socket.setConnectionOptions()
 
 	socket.Conn, _, err = socket.WebsocketDialer.Dial(socket.Url, socket.RequestHeader)
@@ -118,8 +120,8 @@ func (socket *Socket) Connect() {
 	socket.Conn.SetCloseHandler(func(code int, text string) error {
 		result := defaultCloseHandler(code, text)
 		logger.Warning.Println("Disconnected from server ", result)
+		socket.IsConnected = false
 		if socket.OnDisconnected != nil {
-			socket.IsConnected = false
 			socket.OnDisconnected(errors.New(text), *socket)
 		}
 		return result
@@ -132,6 +134,12 @@ func (socket *Socket) Connect() {
 			socket.receiveMu.Unlock()
 			if err != nil {
 				logger.Error.Println("read:", err)
+				socket.IsConnected = false
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
+					if socket.OnCloseError != nil {
+						socket.OnCloseError(err, *socket)
+					}
+				}
 				return
 			}
 			logger.Info.Println("recv: %s", message)
@@ -151,14 +159,14 @@ func (socket *Socket) Connect() {
 }
 
 func (socket *Socket) SendText(message string) {
-	err := socket.send(websocket.TextMessage, [] byte (message))
+	err := socket.send(websocket.TextMessage, []byte(message))
 	if err != nil {
 		logger.Error.Println("write:", err)
 		return
 	}
 }
 
-func (socket *Socket) SendBinary(data [] byte) {
+func (socket *Socket) SendBinary(data []byte) {
 	err := socket.send(websocket.BinaryMessage, data)
 	if err != nil {
 		logger.Error.Println("write:", err)
@@ -166,7 +174,7 @@ func (socket *Socket) SendBinary(data [] byte) {
 	}
 }
 
-func (socket *Socket) send(messageType int, data [] byte) error {
+func (socket *Socket) send(messageType int, data []byte) error {
 	socket.sendMu.Lock()
 	err := socket.Conn.WriteMessage(messageType, data)
 	socket.sendMu.Unlock()
@@ -179,8 +187,8 @@ func (socket *Socket) Close() {
 		logger.Error.Println("write close:", err)
 	}
 	socket.Conn.Close()
+	socket.IsConnected = false
 	if socket.OnDisconnected != nil {
-		socket.IsConnected = false
 		socket.OnDisconnected(err, *socket)
 	}
 }
